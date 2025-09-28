@@ -1,0 +1,33 @@
+{
+  "name": "aws-challenge",
+  "version": "0.1.0",
+  "description": "",
+  "keywords": [
+    "aws-challenge"
+  ],
+  "homepage": "https://github.com/SeanTheBuilder1/aws-challenge#readme",
+  "bugs": {
+    "url": "https://github.com/SeanTheBuilder1/aws-challenge/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SeanTheBuilder1/aws-challenge.git"
+  },
+  "license": "UNLICENSED",
+  "author": "SeanTheBuilder1",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon ./src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.9",
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemon": "^3.1.10"
+  }
+}
