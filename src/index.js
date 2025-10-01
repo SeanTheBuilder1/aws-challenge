@@ -1113,3 +1113,29 @@ app.post(
       .send({ message: "Creator of task", is_creator: true });
   },
 );
+
+app.post(
+  "/api/edit-profile",
+  body("username")
+    .notEmpty()
+    .withMessage("Username is required")
+    .isString()
+    .withMessage("Username must be a string"),
+  validateFunction,
+  validateUser,
+
+  async (req, res) => {
+    const { username } = req.body;
+    const { user_id } = res.locals.validate_user_payload;
+    const { error } = await supabase
+      .from("users")
+      .update({ username: username })
+      .eq("user_id", user_id);
+
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    res.status(200).send({ message: "Username changed" });
+  },
+);
