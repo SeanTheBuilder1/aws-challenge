@@ -15,9 +15,25 @@ const port = process.env.PORT || 8080;
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
+const whitelist = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://aws-challenge-frontend.vercel.app",
+];
+
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: function (origin, callback) {
+      // allow requests with no origin (like curl, server-to-server)
+      if (!origin) return callback(null, true);
+
+      if (whitelist.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        // reject - will result in no CORS headers being sent
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   }),
 );
