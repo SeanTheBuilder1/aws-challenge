@@ -1,0 +1,882 @@
+openapi: 3.0.3
+info:
+  title: AWS Challenge Teams API
+  version: 1.0.0
+  description: |
+    Teams-like platform API. Authentication is cookie-based:
+    - access_token cookie (used by endpoints requiring a logged-in user)
+    - refresh_token cookie (used by refresh/logout endpoints).
+servers:
+  - url: http://localhost:8080
+    description: Local dev
+
+components:
+  securitySchemes:
+    accessCookie:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: Access token cookie (JWT). Sent automatically by client if same-site and credentials included.
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: Refresh token cookie (JWT). Used by /api/refresh and logout endpoints.
+
+  schemas:
+    GenericMessage:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    GenericError:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        password:
+          type: string
+      required: [email, username, password]
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+
+    UserInfo:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        username:
+          type: string
+
+    TeamCreateRequest:
+      type: object
+      properties:
+        team_name:
+          type: string
+        description:
+          type: string
+      required: [team_name]
+
+    Team:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        name:
+          type: string
+        creator:
+          type: integer
+        description:
+          type: string
+        creator_name:
+          type: string
+      required: [team_id, name, creator]
+
+    JoinTeamRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+      required: [team_id]
+
+    PostCreateRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        post_subject:
+          type: string
+        post_body:
+          type: string
+      required: [team_id, post_subject]
+
+    Post:
+      type: object
+      properties:
+        post_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        user_id:
+          type: integer
+        post_subject:
+          type: string
+        post_body:
+          type: string
+        users:
+          type: object
+          properties:
+            username:
+              type: string
+
+    TaskCreateRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        task_subject:
+          type: string
+        task_body:
+          type: string
+      required: [team_id, task_subject]
+
+    Task:
+      type: object
+      properties:
+        task_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        user_id:
+          type: integer
+        task_subject:
+          type: string
+        task_body:
+          type: string
+        completed:
+          type: boolean
+        users:
+          type: object
+          properties:
+            username:
+              type: string
+
+    TeamIdRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+      required: [team_id]
+
+    TeamAndPostIdRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        post_id:
+          type: integer
+      required: [team_id, post_id]
+
+    TeamAndTaskIdRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        task_id:
+          type: integer
+      required: [team_id, task_id]
+
+    CommentRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        task_id:
+          type: integer
+        comment:
+          type: string
+      required: [team_id, task_id, comment]
+
+    DeletePostRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        post_id:
+          type: integer
+      required: [team_id, post_id]
+
+    DeleteTaskRequest:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        task_id:
+          type: integer
+      required: [team_id, task_id]
+
+paths:
+  /api/register:
+    post:
+      summary: Register user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "200":
+          description: Registration success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "400":
+          description: Validation or database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/login:
+    post:
+      summary: Login user (sets refresh_token cookies)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login success (cookies set)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "400":
+          description: Validation or DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+        "401":
+          description: Wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/refresh:
+    get:
+      summary: Exchange refresh token for access_token cookie
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: Refresh successful (access_token cookie set)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "401":
+          description: Invalid or missing refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/logout:
+    post:
+      summary: Logout (delete tokens)
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: No refresh token provided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/create-team:
+    post:
+      summary: Create a new team
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamCreateRequest"
+      responses:
+        "200":
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "400":
+          description: Validation or DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/join-team:
+    post:
+      summary: Join a team
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinTeamRequest"
+      responses:
+        "200":
+          description: Joined team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Forbidden (already creator or already joined)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/post-team:
+    post:
+      summary: Create a team post
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostCreateRequest"
+      responses:
+        "200":
+          description: Posted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Not a member/creator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/list-teams:
+    get:
+      summary: List all teams (includes creator name)
+      security:
+        - accessCookie: []
+      responses:
+        "200":
+          description: Array of teams
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Team"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/list-team-members:
+    post:
+      summary: List team members
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamIdRequest"
+      responses:
+        "200":
+          description: Members list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        team_id:
+                          type: integer
+                        joined_at:
+                          type: string
+                          format: date-time
+                        user_id:
+                          type: integer
+                        users:
+                          type: object
+                          properties:
+                            username:
+                              type: string
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/team-details:
+    post:
+      summary: Team details placeholder (protected)
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamIdRequest"
+      responses:
+        "200":
+          description: Successful access (is member)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Not member or creator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/post-team-task:
+    post:
+      summary: Create a team task
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreateRequest"
+      responses:
+        "200":
+          description: Task posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Not member or creator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/complete-team-task:
+    post:
+      summary: Mark task completed
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamAndTaskIdRequest"
+      responses:
+        "200":
+          description: Task completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/comment-team-task:
+    post:
+      summary: Comment on a team task
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequest"
+      responses:
+        "200":
+          description: Comment posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+
+  /api/get-team-posts:
+    post:
+      summary: Get posts for a team
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamIdRequest"
+      responses:
+        "200":
+          description: Posts array
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Post"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/get-team-tasks:
+    post:
+      summary: Get tasks for a team
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamIdRequest"
+      responses:
+        "200":
+          description: Tasks array
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Task"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/get-post:
+    post:
+      summary: Get a single post
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamAndPostIdRequest"
+      responses:
+        "200":
+          description: Single post
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  post:
+                    $ref: "#/components/schemas/Post"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/get-task:
+    post:
+      summary: Get a single task
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamAndTaskIdRequest"
+      responses:
+        "200":
+          description: Single task
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task:
+                    $ref: "#/components/schemas/Task"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/get-task-comments:
+    post:
+      summary: Get comments for a task
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamAndTaskIdRequest"
+      responses:
+        "200":
+          description: Comments list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        comment_id:
+                          type: integer
+                        task_id:
+                          type: integer
+                        created_at:
+                          type: string
+                          format: date-time
+                        user_id:
+                          type: integer
+                        comment:
+                          type: string
+                        users:
+                          type: object
+                          properties:
+                            username:
+                              type: string
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/get-user-info:
+    get:
+      summary: Get info for current user (from access_token cookie)
+      security:
+        - accessCookie: []
+      responses:
+        "200":
+          description: User info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user_info:
+                    $ref: "#/components/schemas/UserInfo"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/delete-task:
+    post:
+      summary: Delete a task (creator only)
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteTaskRequest"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Not creator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/delete-post:
+    post:
+      summary: Delete a post (creator only)
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeletePostRequest"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "403":
+          description: Not creator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /api/is-post-creator:
+    post:
+      summary: Check if current user is creator of a post
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamAndPostIdRequest"
+      responses:
+        "200":
+          description: boolean result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  creator:
+                    type: boolean
+
+  /api/is-task-creator:
+    post:
+      summary: Check if current user is creator of a task
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamAndTaskIdRequest"
+      responses:
+        "200":
+          description: boolean result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  is_creator:
+                    type: boolean
+
+  /api/edit-profile:
+    post:
+      summary: Edit profile (change username)
+      security:
+        - accessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+              required: [username]
+      responses:
+        "200":
+          description: Username changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericMessage"
+        "400":
+          description: DB error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
