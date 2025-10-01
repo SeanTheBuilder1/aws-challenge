@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import supabase from "./supabase-client.js";
+import cors from "cors";
 import { body, validationResult } from "express-validator";
 
 dotenv.config();
@@ -13,6 +14,13 @@ const port = process.env.PORT || 8080;
 
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
+
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  }),
+);
 
 app.use((err, req, res, next) => {
   if (err.type === "entity.too.large") {
@@ -83,6 +91,39 @@ const validateCreator = async (req, res, next) => {
     return next();
   }
   return res.status(403).send({ message: "Not team creator" });
+};
+
+const validateCreatorAndMembership = async (req, res, next) => {
+  const { team_id } = req.body;
+  const { user_id, username } = res.locals.validate_user_payload;
+
+  const { count: is_member_count, error: is_member_error } = await supabase
+    .from("team_membership")
+    .select("team_id, user_id", { count: "exact", head: true })
+    .eq("team_id", team_id)
+    .eq("user_id", user_id);
+
+  if (is_member_error) {
+    console.log(is_member_error);
+    return res.status(400).send({ message: "Database error" });
+  }
+  if (is_member_count === 1) {
+    return next();
+  }
+  const { count: is_creator_count, error: is_creator_error } = await supabase
+    .from("teams")
+    .select("creator, team_id", { count: "exact", head: true })
+    .eq("creator", user_id)
+    .eq("team_id", team_id);
+
+  if (is_creator_error) {
+    console.log(is_creator_error);
+    return res.status(400).send({ message: "Database error" });
+  }
+  if (is_creator_count === 1) {
+    return next();
+  }
+  return res.status(403).send({ message: "Not team member or creator" });
 };
 
 const validateMembership = async (req, res, next) => {
@@ -371,7 +412,7 @@ app.get("/api/refresh", async (req, res) => {
   const new_token = jwt.sign(
     {
       user_id: result.user_id,
-      username: result.username,
+      username: username,
     },
     process.env.JWT_SECRET,
     {
@@ -494,8 +535,7 @@ app.post(
   body("post_body").optional().isString().withMessage("Body must be a string"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
     const { team_id, post_subject, post_body } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
@@ -554,10 +594,17 @@ app.post(
 
 app.post(
   "/api/team-details",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
   validateFunction,
   validateUser,
+  validateCreatorAndMembership,
   async (req, res) => {
     const { user_id, username } = res.locals.validate_user_payload;
+    res.status(200).send({ message: "Is member" });
   },
 );
 
@@ -576,10 +623,9 @@ app.post(
   body("task_body").optional().isString().withMessage("Body must be a string"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
-    const { task_subject, task_body } = req.body;
+    const { team_id, task_subject, task_body } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
 
     const { error } = await supabase.from("team_tasks").insert({
@@ -610,8 +656,7 @@ app.post(
     .withMessage("Task ID must be an integer ID"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
     const { team_id, task_id } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
@@ -648,10 +693,9 @@ app.post(
     .withMessage("Comment must be a string"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
-    const { team_id, task_id, comment } = req.body();
+    const { team_id, task_id, comment } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
 
     const { error } = await supabase
@@ -674,12 +718,11 @@ app.post(
     .withMessage("Team ID must be an integer ID"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
     const { team_id } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
-    const { data, error } = supabase
+    const { data, error } = await supabase
       .from("team_posts")
       .select(
         "post_id, created_at, user_id, post_subject, post_body, users!user_id(username)",
@@ -702,13 +745,12 @@ app.post(
     .withMessage("Team ID must be an integer ID"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
     const { team_id } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
 
-    const { data, error } = supabase
+    const { data, error } = await supabase
       .from("team_tasks")
       .select(
         "task_id, created_at, user_id, task_subject, task_body, completed, users!user_id(username)",
@@ -719,6 +761,74 @@ app.post(
       return res.status(400).send({ message: "Database error" });
     }
     return res.status(200).send({ tasks: data });
+  },
+);
+
+app.post(
+  "/api/get-post",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
+  body("post_id")
+    .exists()
+    .withMessage("Post ID is required")
+    .isInt()
+    .withMessage("Post ID must be an integer ID"),
+  validateFunction,
+  validateUser,
+  validateCreatorAndMembership,
+  async (req, res) => {
+    const { team_id, post_id } = req.body;
+    const { user_id, username } = res.locals.validate_user_payload;
+
+    const { data, error } = await supabase
+      .from("team_posts")
+      .select(
+        "post_id, created_at, user_id, post_subject, post_body, users!user_id(username)",
+      )
+      .eq("post_id", post_id)
+      .single();
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    return res.status(200).send({ post: data });
+  },
+);
+
+app.post(
+  "/api/get-task",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
+  body("task_id")
+    .exists()
+    .withMessage("Task ID is required")
+    .isInt()
+    .withMessage("Task ID must be an integer ID"),
+  validateFunction,
+  validateUser,
+  validateCreatorAndMembership,
+  async (req, res) => {
+    const { team_id, task_id } = req.body;
+    const { user_id, username } = res.locals.validate_user_payload;
+
+    const { data, error } = await supabase
+      .from("team_tasks")
+      .select(
+        "task_id, created_at, user_id, task_subject, task_body, completed, users!user_id(username)",
+      )
+      .eq("task_id", task_id)
+      .single();
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    return res.status(200).send({ task: data });
   },
 );
 
@@ -736,13 +846,12 @@ app.post(
     .withMessage("Task ID must be an integer ID"),
   validateFunction,
   validateUser,
-  validateCreator,
-  validateMembership,
+  validateCreatorAndMembership,
   async (req, res) => {
-    const { team_id, task_id } = req.body();
+    const { team_id, task_id } = req.body;
     const { user_id, username } = res.locals.validate_user_payload;
 
-    const { data, error } = supabase
+    const { data, error } = await supabase
       .from("team_task_comments")
       .select(
         "comment_id, task_id, created_at, user_id, comment, users!user_id(username)",
@@ -753,5 +862,254 @@ app.post(
       return res.status(400).send({ message: "Database error" });
     }
     return res.status(200).send({ comments: data });
+  },
+);
+
+app.get(
+  "/api/get-user-info",
+  validateFunction,
+  validateUser,
+  async (req, res) => {
+    res.set({
+      "Cache-Control": "no-store",
+      Pragma: "no-cache",
+      Expires: "0",
+    });
+    const { user_id, username } = res.locals.validate_user_payload;
+    return res.status(200).send({
+      message: "Info got",
+      user_info: { user_id: user_id, username: username },
+    });
+  },
+);
+
+app.post("/api/logout", async (req, res) => {
+  const token = req.cookies.access_token;
+
+  const refresh_token = req.cookies.refresh_token;
+  if (!refresh_token)
+    return res.status(403).send({ message: "No refresh token to logout" });
+  let payload;
+  try {
+    payload = jwt.verify(refresh_token, process.env.REFRESH_JWT_SECRET);
+  } catch (error) {
+    res.clearCookie("refresh_token", {
+      httpOnly: true,
+      path: "/api/refresh",
+      sameSite: "None",
+      partitioned: true,
+      secure: true,
+    });
+    res.clearCookie("refresh_token", {
+      httpOnly: true,
+      path: "/api/logout",
+      sameSite: "None",
+      partitioned: true,
+      secure: true,
+    });
+    res.clearCookie("access_token", {
+      httpOnly: true,
+      sameSite: "None",
+      partitioned: true,
+      secure: true,
+    });
+    res.status(401).send({ message: "failed" });
+    return;
+  }
+
+  const { user_id, username, token_uuid } = payload;
+  const { error } = await supabase
+    .from("refresh_tokens")
+    .delete()
+    .eq("refresh_uuid", token_uuid);
+
+  if (error) {
+    console.log(error);
+    return res.status(400).send({ message: "Database error" });
+  }
+  res.clearCookie("access_token", {
+    httpOnly: true,
+    sameSite: "None",
+    partitioned: true,
+    secure: true,
+  });
+  res.clearCookie("refresh_token", {
+    httpOnly: true,
+    path: "/api/refresh",
+    sameSite: "None",
+    partitioned: true,
+    secure: true,
+  });
+  res.clearCookie("refresh_token", {
+    httpOnly: true,
+    path: "/api/logout",
+    sameSite: "None",
+    partitioned: true,
+    secure: true,
+  });
+  res.status(200).send({ message: "Logout successful" });
+});
+
+app.post(
+  "/api/delete-task",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
+  body("task_id")
+    .exists()
+    .withMessage("Task ID is required")
+    .isInt()
+    .withMessage("Task ID must be an integer ID"),
+  validateFunction,
+  validateUser,
+  validateCreatorAndMembership,
+  async (req, res) => {
+    const { team_id, task_id } = req.body;
+    const { user_id, username } = res.locals.validate_user_payload;
+
+    const { count, error } = await supabase
+      .from("team_tasks")
+      .select("*", { count: "exact", head: true })
+      .eq("task_id", task_id)
+      .eq("user_id", user_id);
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    if (count !== 1) {
+      return res.status(403).send({ message: "Not creator of task" });
+    }
+    const { data, error: delete_error } = await supabase
+      .from("team_tasks")
+      .delete()
+      .eq("task_id", task_id);
+    if (delete_error) {
+      console.log(delete_error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    return res.status(200).send({ message: "Task deleted successfully" });
+  },
+);
+
+app.post(
+  "/api/delete-post",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
+  body("post_id")
+    .exists()
+    .withMessage("Post ID is required")
+    .isInt()
+    .withMessage("Post ID must be an integer ID"),
+  validateFunction,
+  validateUser,
+  validateCreatorAndMembership,
+  async (req, res) => {
+    const { team_id, post_id } = req.body;
+    const { user_id, username } = res.locals.validate_user_payload;
+
+    const { count, error } = await supabase
+      .from("team_posts")
+      .select("*", { count: "exact", head: true })
+      .eq("post_id", post_id)
+      .eq("user_id", user_id);
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    if (count !== 1) {
+      return res.status(403).send({ message: "Not creator of post" });
+    }
+    const { data, error: delete_error } = await supabase
+      .from("team_posts")
+      .delete()
+      .eq("post_id", post_id);
+    if (delete_error) {
+      console.log(delete_error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    return res.status(200).send({ message: "Post deleted successfully" });
+  },
+);
+
+app.post(
+  "/api/is-post-creator",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
+  body("post_id")
+    .exists()
+    .withMessage("Post ID is required")
+    .isInt()
+    .withMessage("Post ID must be an integer ID"),
+  validateFunction,
+  validateUser,
+  validateCreatorAndMembership,
+
+  async (req, res) => {
+    const { team_id, post_id } = req.body;
+    const { user_id, username } = res.locals.validate_user_payload;
+
+    const { count, error } = await supabase
+      .from("team_posts")
+      .select("*", { count: "exact", head: true })
+      .eq("post_id", post_id)
+      .eq("user_id", user_id);
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    if (count !== 1) {
+      return res
+        .status(200)
+        .send({ message: "Not creator of post", creator: false });
+    }
+    return res.status(200).send({ message: "Creator of post", creator: true });
+  },
+);
+
+app.post(
+  "/api/is-task-creator",
+  body("team_id")
+    .exists()
+    .withMessage("Team ID is required")
+    .isInt()
+    .withMessage("Team ID must be an integer ID"),
+  body("task_id")
+    .exists()
+    .withMessage("Task ID is required")
+    .isInt()
+    .withMessage("Task ID must be an integer ID"),
+  validateFunction,
+  validateUser,
+  validateCreatorAndMembership,
+
+  async (req, res) => {
+    const { team_id, task_id } = req.body;
+    const { user_id, username } = res.locals.validate_user_payload;
+
+    const { count, error } = await supabase
+      .from("team_tasks")
+      .select("*", { count: "exact", head: true })
+      .eq("task_id", task_id)
+      .eq("user_id", user_id);
+    if (error) {
+      console.log(error);
+      return res.status(400).send({ message: "Database error" });
+    }
+    if (count !== 1) {
+      return res
+        .status(200)
+        .send({ message: "Not creator of task", is_creator: false });
+    }
+    return res
+      .status(200)
+      .send({ message: "Creator of task", is_creator: true });
   },
 );
